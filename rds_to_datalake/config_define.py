@@ -4,6 +4,7 @@
 Project level configuration.
 """
 
+import typing as T
 import dataclasses
 from boto_session_manager import BotoSesManager
 
@@ -20,14 +21,16 @@ class Config:
     :param glue_database: glue catalog database name
     :param glue_table: glue catalog table name
     """
+
     app_name: str
     aws_profile: str
-    host: str
+    vpc_id: str
+    subnet_id_list: T.List[str]
+    authorized_ip_list: T.List[str]
     port: int
     database: str
     username: str
     password: str
-    glue_database: str
 
     @cached_property
     def bsm(self) -> BotoSesManager:
@@ -42,11 +45,28 @@ class Config:
         return self.bsm.aws_region
 
     @property
-    def dms_role_name(self) -> str:
-        """
-        AWS Database migration service IAM role name (name only)
-        """
-        return f"{self.app_name}-dms-role"
+    def app_name_slug(self) -> str:
+        return self.app_name.replace("_", "-")
+
+    @property
+    def app_name_snake(self) -> str:
+        return self.app_name.replace("-", "_")
+
+    @property
+    def dms_vpc_role_name(self) -> str:
+        return f"dms-vpc-role"
+
+    @property
+    def dms_cloudwatch_logs_role_name(self) -> str:
+        return f"dms-cloudwatch-logs-role"
+
+    @property
+    def dms_rds_postgres_endpoint_role_name(self) -> str:
+        return f"{self.app_name}-rds-postgres-endpoint-role"
+
+    @property
+    def dms_s3_endpoint_role_name(self) -> str:
+        return f"{self.app_name}-s3-endpoint-role"
 
     @property
     def lambda_role_name(self) -> str:
@@ -63,8 +83,14 @@ class Config:
         return f"{self.app_name}-glue-role"
 
     @property
-    def dms_role_arn(self) -> str:
-        return f"arn:aws:iam::{self.aws_account_id}:role/{self.dms_role_name}"
+    def dms_rds_postgres_endpoint_role_arn(self) -> str:
+        return f"arn:aws:iam::{self.aws_account_id}:role/{self.dms_rds_postgres_endpoint_role_name}"
+
+    @property
+    def dms_s3_endpoint_role_arn(self) -> str:
+        return (
+            f"arn:aws:iam::{self.aws_account_id}:role/{self.dms_s3_endpoint_role_name}"
+        )
 
     @property
     def lambda_role_arn(self) -> str:
@@ -76,11 +102,59 @@ class Config:
 
     @property
     def cloudformation_stack_name(self) -> str:
-        return self.app_name.replace("_", "-")
+        return self.app_name_slug
+
+    @property
+    def db_subnet_group_name(self) -> str:
+        return f"{self.app_name}-db-subnet-group"
+
+    @property
+    def db_parameter_group_name(self) -> str:
+        return f"{self.app_name_slug}-db-parameter-group"
+
+    @property
+    def db_security_group_name(self) -> str:
+        return f"{self.app_name}-db-security-group"
+
+    @property
+    def db_instance_identifier(self) -> str:
+        return f"{self.app_name_slug}-db"
+
+    @property
+    def db_instance_host_output_id(self) -> str:
+        return f"DBInstanceHost"
+
+    @property
+    def dms_subnet_group_name(self) -> str:
+        return f"{self.app_name}-dms-subnet-group"
+
+    @property
+    def dms_replication_instance_name(self) -> str:
+        return self.app_name_slug
+
+    @property
+    def dms_replication_instance_arn(self) -> str:
+        return f"arn:aws:dms:{self.aws_region}:{self.aws_account_id}:rep:{self.dms_replication_instance_name}"
+
+    @property
+    def dms_postgres_source_endpoint_name(self) -> str:
+        return f"{self.app_name_slug}-postgres-source-endpoint"
+
+    @property
+    def dms_s3_target_endpoint_name(self) -> str:
+        return f"{self.app_name_slug}-s3-target-endpoint"
+
+    @property
+    def dms_replication_task_name(self) -> str:
+        return f"{self.app_name_slug}-replication-task"
 
     @property
     def lambda_function_name_dynamodb_stream_consumer(self) -> str:
         return f"{self.app_name}_dynamodb_stream_consumer"
+
+    @property
+    def glue_database(self) -> str:
+        return self.app_name_snake
 
     @property
     def glue_job_name_initial_load(self) -> str:

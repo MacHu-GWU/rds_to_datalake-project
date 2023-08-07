@@ -1,136 +1,88 @@
 # -*- coding: utf-8 -*-
 
 import typing as T
-import random
 
-import polars as pl
+import sqlalchemy as sa
 from rich import print as rprint
-from datetime import datetime, timezone
 
 from .config_init import config
-from .boto_ses import bsm
-from .dynamodb_table import Transaction
+from .db_connect import create_engine_for_this_project
+from .db_orm import table_name_list, get_table_def
 from .athena import run_athena_query
 
 
-def hudify_transaction(transaction: Transaction) -> dict:
-    account = transaction.attribute_values["account"]
-    create_at_datetime = transaction.attribute_values["create_at"]
-    update_at_datetime = transaction.attribute_values["update_at"]
-    entity = transaction.attribute_values["entity"]
-    amount = transaction.attribute_values["amount"]
-    is_credit = transaction.attribute_values["is_credit"]
-    note = transaction.attribute_values["note"]
-
-    create_at = create_at_datetime.strftime("%Y-%m-%dT%H:%M:%S.%f%z")
-    update_at = update_at_datetime.strftime("%Y-%m-%dT%H:%M:%S.%f%z")
-    create_year = create_at_datetime.year
-    create_month = create_at_datetime.month
-    create_day = create_at_datetime.day
-    create_hour = create_at_datetime.hour
-    create_minute = create_at_datetime.minute
-
-    row = dict(
-        id=f"account:{account},create_at:{create_at}",
-        account=account,
-        create_at=create_at,
-        create_year=create_year,
-        create_month=create_month,
-        create_day=create_day,
-        create_hour=create_hour,
-        create_minute=create_minute,
-        update_at=update_at,
-        entity=entity,
-        amount=amount,
-        is_credit=is_credit,
-        note=note,
-    )
-    return row
+T_RECORDS = T.List[T.Dict[str, T.Any]]
 
 
-def read_from_dynamodb() -> T.List[T.Dict[str, T.Any]]:
+def read_from_rds_table(
+    engine: sa.engine.Engine,
+    table_name: str,
+) -> T_RECORDS:
+    table = get_table_def(table_name)
     rows = list()
-    for transaction in Transaction.scan(
-        # limit=10,
-    ):
-        row = hudify_transaction(transaction)
-        rows.append(row)
-
-    df = pl.DataFrame(rows)
-    df = df.sort("id")
-    records = df.to_dicts()
-    # rprint(records[:3])
-    print(f"dynamodb table shape: {df.shape}")
-    return records
+    with engine.connect() as conn:
+        stmt = sa.select(table).order_by(table.c.id)
+        for row in conn.execute(stmt).mappings():
+            rows.append(dict(row))
+    return rows
 
 
-def read_from_hudi() -> T.List[T.Dict[str, T.Any]]:
+def read_from_hudi_table(
+    table_name: str,
+) -> T_RECORDS:
     df = run_athena_query(
         database=config.glue_database,
-        sql=f"SELECT * FROM {config.glue_database}.{config.glue_table}",
+        sql=f"SELECT * FROM {config.glue_database}.{table_name} ORDER BY id",
+        verbose=False,
     )
-    df = df.drop(
-        [
-            "_hoodie_commit_time",
-            "_hoodie_commit_seqno",
-            "_hoodie_record_key",
-            "_hoodie_partition_path",
-            "_hoodie_file_name",
-        ]
-    )
+    columns_to_drop = [
+        "create_year",
+        "create_month",
+        "create_day",
+        "create_hour",
+        "create_minute",
+    ]
+    for column in df.columns:
+        if column.startswith("_hoodie"):
+            columns_to_drop.append(column)
+    rows = df.drop(columns_to_drop).to_dicts()
+    return rows
 
-    df = df.sort("id")
-    records = df.to_dicts()
-    # rprint(records[:3])
-    print(f"hudi table shape: {df.shape}")
-    return records
+
+def compare_table(engine: sa.engine.Engine, table_name: str):
+    print(f"--- Compare table {table_name!r} ---")
+    rds_rows = read_from_rds_table(engine, table_name)
+    dl_rows = read_from_hudi_table(table_name)
+    n_rds_rows = len(rds_rows)
+    n_dl_rows = len(dl_rows)
+    print(f"n_rds_rows: {n_rds_rows}")
+    print(f"n_dl_rows: {n_dl_rows}")
+    if n_rds_rows != n_dl_rows:
+        raise ValueError("n_rds_rows != n_dl_rows")
+    else:
+        print("NICE! n_rds_rows == n_dl_rows")
+
+    # print first 10 rows that are different
+    is_same = True
+    diff_count = 0
+    for rds_row, dl_row in zip(rds_rows, dl_rows):
+        if rds_row != dl_row:
+            is_same = False
+            diff_count += 1
+            if diff_count <= 10:
+                print(f"rds_row: {rds_row}")
+                print(f"dl_row: {dl_row}")
+
+    if is_same is True:
+        print("NICE! The data in rds and hudi are exactly the same.")
+    else:
+        print("OPS! The data in rds and hudi are not the same.")
 
 
 def compare():
     """
-    Compare the data in dynamodb and hudi, see if they are exactly the same.
+    Compare the data in RDS and Hudi, see if they are exactly the same.
     """
-    records1 = read_from_dynamodb()
-    records2 = read_from_hudi()
-    print(f"records in dynamodb: {len(records2)}")
-    print(f"records in hudi: {len(records1)}")
-    records1_id_set = {record["id"] for record in records1}
-    records2_id_set = {record["id"] for record in records2}
-    delta_id_set = records1_id_set.difference(records2_id_set)
-    delta_id_list = list(delta_id_set)
-    rprint(delta_id_list[:10])
-    is_same = True
-    for record1, record2 in zip(records1, records2):
-        if record1 != record2:
-    #         print("-" * 80)
-    #         rprint(record1)
-    #         rprint(record2)
-            is_same = False
-    #         for key, value1 in record1.items():
-    #             value2 = record2[key]
-    #             if value1 != value2:
-    #                 print(f"{key}: {value1} != {value2}")
-    if is_same is True:
-        print("The data in dynamodb and hudi are exactly the same.")
-    else:
-        print("The data in dynamodb and hudi are not the same.")
-
-
-def investigate():
-    records2 = read_from_hudi()
-
-    for _ in range(10):
-        record2 = random.choice(records2)
-        account = record2["account"]
-        create_at = record2["create_at"]
-        create_at_datetime = datetime.strptime(create_at, "%Y-%m-%dT%H:%M:%S.%f%z")
-        transaction = Transaction.get(account, create_at_datetime)
-        record1 = hudify_transaction(transaction)
-        if record1 != record2:
-            print("-" * 80)
-            rprint(record1)
-            rprint(record2)
-            for key, value1 in record1.items():
-                value2 = record2[key]
-                if value1 != value2:
-                    print(f"{key}: {value1} != {value2}")
+    engine = create_engine_for_this_project()
+    for table_name in table_name_list:
+        compare_table(engine, table_name)

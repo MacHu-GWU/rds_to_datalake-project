@@ -1,21 +1,17 @@
 # -*- coding: utf-8 -*-
 
 import typing as T
+from datetime import datetime, timezone
+
 from pathlib_mate import Path
 
 from .config_init import config
 from .boto_ses import bsm
 from .s3paths import (
     s3dir_glue_artifacts,
-    s3dir_dynamodb_export_processed,
-    s3dir_dynamodb_stream,
-    s3dir_table,
+    s3dir_dms_output_database,
     s3dir_incremental_glue_job_input,
     s3path_incremental_glue_job_tracker,
-)
-from .paths import (
-    path_glue_script_initial_load,
-    path_glue_script_incremental,
 )
 from .incremental_load_orchestration import CDCTracker
 
@@ -125,50 +121,19 @@ def create_hudi_glue_job(
     )
 
 
-def create_initial_load_glue_job():
-    create_hudi_glue_job(
-        glue_client=bsm.glue_client,
-        job_name=config.glue_job_name_initial_load,
-        job_script=path_glue_script_initial_load,
-        glue_role_arn=config.glue_role_arn,
-        additional_params={
-            "--S3URI_DYNAMODB_EXPORT_PROCESSED": s3dir_dynamodb_export_processed.uri,
-            "--S3URI_TABLE": s3dir_table.uri,
-            "--DATABASE_NAME": config.glue_database,
-            "--TABLE_NAME": config.glue_table,
-        },
-    )
-
-
-def create_incremental_glue_job():
-    create_hudi_glue_job(
-        glue_client=bsm.glue_client,
-        job_name=config.glue_job_name_incremental,
-        job_script=path_glue_script_incremental,
-        glue_role_arn=config.glue_role_arn,
-        additional_params={
-            "--S3URI_INCREMENTAL_GLUE_JOB_TRACKER": s3path_incremental_glue_job_tracker.uri,
-            "--S3URI_TABLE": s3dir_table.uri,
-            "--DATABASE_NAME": config.glue_database,
-            "--TABLE_NAME": config.glue_table,
-        },
-    )
-
-
-def run_initial_load_glue_job():
-    print("run initial load glue job")
+def run_initial_glue_job():
     bsm.glue_client.start_job_run(
         JobName=config.glue_job_name_initial_load,
     )
 
 
-def run_incremental_glue_job(epoch_processed_partition: str):
-    tracker = CDCTracker.read(
+def run_incremental_glue_job():
+    cdc_tracker = CDCTracker.read(
         bsm=bsm,
         s3path_tracker=s3path_incremental_glue_job_tracker,
         s3dir_glue_job_input=s3dir_incremental_glue_job_input,
-        s3dir_dynamodb_stream=s3dir_dynamodb_stream,
+        s3dir_dms_output_database=s3dir_dms_output_database,
         glue_job_name=config.glue_job_name_incremental,
-        epoch_processed_partition=epoch_processed_partition,
+        epoch_processed_datetime=datetime(2023, 1, 1, tzinfo=timezone.utc),
     )
-    tracker.run_glue_job(bsm=bsm)
+    cdc_tracker.try_to_run_glue_job(bsm=bsm)

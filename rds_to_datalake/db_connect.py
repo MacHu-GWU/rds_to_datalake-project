@@ -17,9 +17,12 @@ def create_engine(
 
 def create_engine_for_this_project() -> sa.engine.Engine:
     from .config_init import config
+    from .cdk_export import Outputs
+
+    outputs = Outputs.read()
 
     engine = create_engine(
-        host=config.host,
+        host=outputs.db_instance_host,
         port=config.port,
         database=config.database,
         username=config.username,

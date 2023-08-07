@@ -15,6 +15,9 @@ import sqlalchemy as sa
 import sqlalchemy.orm as orm
 from rich import print as rprint
 
+
+from rds_to_datalake.s3paths import s3dir_dms_output_database, s3dir_database
+from rds_to_datalake.boto_ses import bsm
 from rds_to_datalake.db_connect import create_engine_for_this_project
 from rds_to_datalake.db_orm import Base, Account, Transaction
 
@@ -60,9 +63,12 @@ def new_account():
     Simulate an event that create a new account.
     """
     with orm.Session(engine) as session:
+        now = get_utc_now()
         account = Account(
             id=rnd_account(),
             email=fake.email(),
+            create_at=now.isoformat(),
+            update_at=now.isoformat(),
         )
         session.add(account)
         session.commit()
@@ -73,6 +79,9 @@ def update_account():
     with orm.Session(engine) as session:
         account_id = random.choice(account_set)
         account = session.get(Account, account_id)
+
+        now = get_utc_now()
+        account.update_at = now.isoformat()
         account.email = fake.email()
         session.commit()
 
@@ -115,6 +124,9 @@ def delete_all():
         session.query(Transaction).delete()
         session.query(Account).delete()
         session.commit()
+
+    s3dir_dms_output_database.delete()
+    s3dir_database.delete()
 
 
 def run_data_faker():

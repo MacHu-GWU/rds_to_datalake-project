@@ -18,6 +18,8 @@ class Account(Base):
 
     id: orm.Mapped[str] = orm.mapped_column(primary_key=True)
     email: orm.Mapped[str] = orm.mapped_column(sa.String())
+    create_at: orm.Mapped[str] = orm.mapped_column(sa.String())
+    update_at: orm.Mapped[str] = orm.mapped_column(sa.String())
 
     transactions: orm.Mapped[T.List["Transaction"]] = orm.relationship(
         back_populates="account",
@@ -44,3 +46,9 @@ transaction_create_at_index = sa.Index(
     "transaction_create_at_idx",
     Transaction.create_at,
 )
+
+table_name_list = list(Base.metadata.tables)
+table_name_list.sort()
+
+def get_table_def(table_name: str) -> sa.Table:
+    return Base.metadata.tables[table_name]

@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 
-from rds_to_datalake.db_connect import create_engine_for_this_proejct
+from rds_to_datalake.db_connect import create_engine_for_this_project
 
 
 def test_create_engine_for_this_proejct():
-    create_engine_for_this_proejct()
+    create_engine_for_this_project()
 
 
 if __name__ == "__main__":

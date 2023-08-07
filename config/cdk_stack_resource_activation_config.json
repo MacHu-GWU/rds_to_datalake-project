@@ -1,0 +1,8 @@
+{
+    "declare_s3_bucket": true,
+    "declare_iam_role": true,
+    "declare_rds_database": true,
+    "declare_dms": true,
+    "declare_glue_catalog": true,
+    "declare_glue_job": true
+}
