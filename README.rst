@@ -1,39 +1,30 @@
-Dynamodb to DataLake Project
+RDS to DataLake Project
 ==============================================================================
 
 
 Overview
 ------------------------------------------------------------------------------
-本项目是一个 Demo 项目, 展示了如何使用 `AWS Glue + Apache Hudi <https://docs.aws.amazon.com/glue/latest/dg/aws-glue-programming-etl-format-hudi.html>`_ 将数据从 `Amazon Dynamodb <https://aws.amazon.com/dynamodb/>`_ 以近实时 (时延小于 5 分钟) 的方式不断写入 `S3 DataLake <https://aws.amazon.com/big-data/datalakes-and-analytics/datalakes/>`_.
+本项目是一个 Demo 项目, 展示了如何使用 `AWS Glue + Apache Hudi <https://docs.aws.amazon.com/glue/latest/dg/aws-glue-programming-etl-format-hudi.html>`_ 将数据从 `Postgres DB 以近实时 (时延小于 5 分钟) 的方式不断写入 `S3 DataLake <https://aws.amazon.com/big-data/datalakes-and-analytics/datalakes/>`_.
 
 **背景信息**
 
-Amazon DynamoDB 是一款非常流行的 NoSQL 数据库, 有着近乎无限扩容的能力以及超高读写性能. 不过 DynamoDB 并不是为大数据分析而设计的, 直接用它来进行查询分析经常需要做全表扫描, 这样不仅性能低下, 成本也高, 还会影响正常业务的性能. 所以为了能分析 DynamoDB 中的数据, 企业往往会利用 `Export to S3 <https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/S3DataExport.HowItWorks.html>`_ 功能定期 (例如每天晚上) 将全量数据导出到 S3, 然后用导出的数据构建一个 Data Warehouse 来进行分析. 虽然该解决方案非常简单, 容易实现, 不过它也存在如下问题:
-
-1. 全量数据导出对于较大的表通常要花费很长时间. 超过 1M 条数据的表导出时间就超过了 10 分钟. 对于 1B 以上的表超过 1 小时也很正常.
-2. 我们需要对导出的数据进行简单的入仓处理 (转换格式并存入数据仓库). 和前一步类似, 花费的事件也在 10 分钟 到 1 小时以上不等.
-3. 上面两个步骤随着数据量的增加, 每次做的时候耗费的时间和资源也会增加.
-
-可以看出, 该解决方案可以实现离线查询, 但是无法实现近实时查询.
+RDBMS 一般承载着关键的业务数据以及流程. 直接使用 RDBMS 进行数据分析会影响数据库性能. 所以业内一般采用将 RDBMS 中的数据同步到数据仓库进行分析的方案. 而这个同步的方式早期往往是直接把数据库 Dump 出来再 Load 到数据仓库中. 如果数据库本身很大, 那么 Load 一次可能需要几个小时, 并且我们要避开日常业务的时间来进行. 这就导致数据的延迟很大. 比较新的做法是用 Capture of Data Change Event 来捕获增量数据, 再将其同步到数据仓库中.
 
 **相关技术简介**
 
 `Apache Hudi <https://hudi.apache.org/>`_ 是新一代的数据湖引擎, 主打的是用价格低廉的云存储来实现高吞吐量, transactional, 近实时的不断变化的数据入湖.
 
-`AWS Glue <https://aws.amazon.com/glue/>`_ 则是一款基于 Spark 的无服务器服务, 能让用户无需管理基础设施就能使用 Spark 大数据引擎. 自 2022-11 月 Glue 发布了 4.0 起, 它增加了对 Hudi 的原生支持, 使得在 AWS Glue 上使用 Hudi 变得无比简单.
-
-`DynamoDB Export to S3 <https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/S3DataExport.HowItWorks.html>`_: 是 DynamoDB 的一个原生功能. 它能将根据底层的 write ahead log 日志, 计算出某个时间点的最终全量数据状态, 并导出到 S3. 该功能能够指定将某个时间点的数据全部导出到 S3. 这部分数据也通常被称为 Initial Load, 也就是初始数据.
-
-`DynamoDB Stream <https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Streams.html>`_ 是 DynamoDB 的一个原生功能, 能将 Change of Data Capture (CDC) 数据以实时的方式推送到一个数据流中, 从而能被各种程序所消费. 例如你可以用一个 Lambda Function 处理数据流中的数据. 这部分数据也通常被称为 Incremental Data, 也就是增量数据.
+`AWS DMS <https://aws.amazon.com/dms/>`_ 是一个云原生数据库迁徙的工具, 它具有将 CDC 数据持续导出到 S3 的功能, 这也是我们这个 Solution 依赖的核心功能之一.
 
 **关于其他数据库数据入湖**
 
-本项目以 Amazon DynamoDB 为例, 介绍了 Trnasactional 数据库数据的基本策略. 在本质上, 其他的数据库入湖也遵循着类似的思路, 细节上会略有不同. 因为 DynamoDB 这款数据库无需安装, 开箱即用, 也没有前期费用, 用多少花多少钱, 所以非常适合做为 Demo 来快速上手, 帮助用户了解数据库入湖的核心技术.
+本项目以 Postgres 为例, 介绍如何将 RDBMS 数据库中的数据以近实时的方式同步到数据仓库的基本策略. 在本质上, 其他的 RDBMS 入湖也遵循着类似的思路, 细节上会略有不同. 该项目非常适合做为 Demo 来快速上手, 帮助用户了解数据库入湖的核心技术.
 
 **我们的目标**
 
-我们希望能以近实时的方式将 DynamoDB 的数据导出到数据湖中, 并能对其进行高性能数据分析. 下一节, 我们将介绍能达成这一目标的解决方案.
+我们希望能以近实时的方式将 RDBMS 的数据导出到数据湖中, 并能对其进行高性能数据分析. 下一节, 我们将介绍能达成这一目标的解决方案.
 
+[TODO 下面的还没有更新]
 
 The Solution
 ------------------------------------------------------------------------------
